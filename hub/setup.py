@@ -16,7 +16,7 @@ setup(
         ]),
 		("lib/" + package_name, [
             "hub/GUI.py",
-            "hub/SmartHomeHubThread.py",
+            "hub/SmartHomeHubController.py",
             "hub/SmartHomeHubNode.py"
         ]),
 		("lib/" + package_name + "/resources", [
