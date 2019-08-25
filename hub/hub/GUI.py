@@ -3,29 +3,34 @@ from PIL import Image, ImageTk
 from time import sleep
 
 from ament_index_python.packages import get_package_prefix
-from smart_home_msgs.msg import ModeChange
+from smart_home_msgs.msg import ModeChange, CountdownState
 
 from SmartHomeHubController import SmartHomeHubController
+
+LIGHT_YELLOW_COLOR = "#F0E68C"
 
 MODES_DICT = {
 	ModeChange.FULL_OFF          : ("Full Off",           "#0F2F2F"),
 	ModeChange.FULL_ON           : ("Full On",            "#3CCB2C"),
-	ModeChange.INDIVIDUAL_CONTROL: ("Individual Control", "#F0E68C"),
-	ModeChange.MORNING_COUNTDOWN : ("Morning Countdown",  "#F0E68C"),
-	ModeChange.FOLLOW_SOUND      : ("Follow Sound",       "#F0E68C"),
-	ModeChange.WAVE              : ("Wave",               "#F0E68C"),
+	ModeChange.INDIVIDUAL_CONTROL: ("Individual Control", LIGHT_YELLOW_COLOR),
+	ModeChange.MORNING_COUNTDOWN : ("Morning Countdown",  LIGHT_YELLOW_COLOR),
+	ModeChange.FOLLOW_SOUND      : ("Follow Sound",       LIGHT_YELLOW_COLOR),
+	ModeChange.WAVE              : ("Wave",               LIGHT_YELLOW_COLOR)
 }
 
-MAIN_TEXT_ENABLED_COLOR  = "#652828"
-MAIN_TEXT_DISABLED_COLOR = "#220808"
-
-MAIN_COMPONENT_ENABLED_COLOR  = "#CDCDCD"
-MAIN_COMPONENT_DISABLED_COLOR = "#686868"
+MAIN_TEXT_COLOR           = "#652828"
+MAIN_COMPONENT_COLOR      = "#CDCDCD"
+SECONDARY_TEXT_COLOR      = LIGHT_YELLOW_COLOR
+SECONDARY_COMPONENT_COLOR = "#555555"
 
 TEXT_INDENTATION = 15
 
-MAIN_CANVAS_GRID_ROW_COUNT = 10
+MAIN_CANVAS_GRID_ROW_COUNT    = 11
 MAIN_CANVAS_GRID_COLUMN_COUNT = 10
+
+TRAFFIC_LIGHT_CANVAS_IMAGE_TAG = "traffic_light_canvas_image"
+
+HUB_INSTALL_LIB_DIRECTORY = get_package_prefix("hub")
 
 def get_mode_characteristics(val):
 	if val in MODES_DICT:
@@ -33,30 +38,44 @@ def get_mode_characteristics(val):
 	else:
 		return ("UNDEFINED", "#FF0000")
 
-def get_pixel_at(row, col, sw, sh, dx=0, dy=0):
-	return (
-		int(((sw / MAIN_CANVAS_GRID_COLUMN_COUNT) * col) + dx),
-		int(((sh / MAIN_CANVAS_GRID_ROW_COUNT) * row) + dy)
-	)
+def get_resource_url(url_suffix):
+	return HUB_INSTALL_LIB_DIRECTORY + "/lib/hub/resources/" + url_suffix
+	
+def get_traffic_light_url_for(state):
+	return get_resource_url("traffic_lights/traffic_light_{0}.png".format(state))
+
+def generate_traffic_light_image_for(state):
+	return Image.open(get_traffic_light_url_for(state)).resize((200, 500), Image.ANTIALIAS)
 
 class GUI():
 	
 	def __init__(self, args):
-		self.hub_controller = SmartHomeHubController(args, self.handle_mode_type_change, self.handle_clock_change)
+		self.initialized = False
+		
+		self.hub_controller = SmartHomeHubController(
+			args,
+			self.handle_clock_change,
+			self.handle_mode_type_change,
+			self.handle_traffic_light_change
+		)
 		
 		self.tk_root = tkinter.Tk()
 		
-		screen_width = self.tk_root.winfo_screenwidth()
-		screen_height = self.tk_root.winfo_screenheight()
+		self.screen_width = self.tk_root.winfo_screenwidth()
+		self.screen_height = self.tk_root.winfo_screenheight()
 		
-		original_image = Image.open(get_package_prefix("hub") + "/lib/hub/resources/kyoto.png")
-		original_image = original_image.resize((screen_width, screen_height), Image.ANTIALIAS)
-		self.background_image = ImageTk.PhotoImage(original_image)
+		original_background_image = Image.open(get_resource_url("kyoto.png"))
+		original_background_image = original_background_image.resize((self.screen_width, self.screen_height), Image.ANTIALIAS)
+		self.background_image = ImageTk.PhotoImage(original_background_image)
+		
+		self.mode_widgets = {}
+		for k in MODES_DICT.keys():
+			self.mode_widgets[k] = []
 		
 		self.main_canvas = tkinter.Canvas(
 			self.tk_root,
-			width=screen_width,
-			height=screen_height,
+			width=self.screen_width,
+			height=self.screen_height,
 			highlightthickness=0
 		)
 		self.main_canvas.grid(
@@ -68,41 +87,96 @@ class GUI():
 		
 		self.main_canvas.create_image((0, 0), image=self.background_image, anchor=tkinter.NW)
 		
-		greetings_label = self.main_canvas.create_text(
+		#
+		# The canvas text
+		#
+		
+		self.main_canvas.create_text(
 			(TEXT_INDENTATION, 0),
 			text="Hey there, beautiful ;)",
 			font="MSGothic 42 bold",
-			fill=MAIN_TEXT_ENABLED_COLOR,
+			fill=MAIN_TEXT_COLOR,
 			anchor=tkinter.NW
 		)
 		
-		current_mode_label = self.main_canvas.create_text(
-			(screen_width - TEXT_INDENTATION, 0),
+		self.current_day_time_label = self.main_canvas.create_text(
+			(TEXT_INDENTATION, self.screen_height - TEXT_INDENTATION),
+			font="MSGothic 16 bold",
+			fill=MAIN_TEXT_COLOR,
+			anchor=tkinter.SW
+		)
+		
+		self.main_canvas.create_text(
+			(self.screen_width - TEXT_INDENTATION, 0),
 			text="Current Mode:",
 			font="MSGothic 20 bold",
-			fill=MAIN_TEXT_ENABLED_COLOR,
+			fill=MAIN_TEXT_COLOR,
 			anchor=tkinter.NE
 		)
 		
 		self.current_mode_value_label = self.main_canvas.create_text(
-			(screen_width - TEXT_INDENTATION, 40),
+			(self.screen_width - TEXT_INDENTATION, 40),
 			font="MSGothic 20 bold",
 			anchor=tkinter.NE
 		)
 		
-		self.current_day_label = self.main_canvas.create_text(
-			(TEXT_INDENTATION, screen_height - (TEXT_INDENTATION + 40)),
-			font="MSGothic 24 bold",
-			fill=MAIN_TEXT_ENABLED_COLOR,
-			anchor=tkinter.SW
-		)
+		#
+		# The four main control widgets
+		# (power on/off, mode dropdown, and mode confirmation)
+		#
 		
-		self.current_time_label = self.main_canvas.create_text(
-			(TEXT_INDENTATION, screen_height - TEXT_INDENTATION),
-			font="MSGothic 24 bold",
-			fill=MAIN_TEXT_ENABLED_COLOR,
-			anchor=tkinter.SW
+		self.power_off_btn = tkinter.Button(
+			self.tk_root,
+			text="Turn Everything Off",
+			font="MSGothic 16 bold",
+			background="#CD2828",
+			activebackground="#FF0000",
+			command=self.hub_controller.set_full_off_mode_type
 		)
+		self.power_off_btn.grid(row=2, column=0, rowspan=2, columnspan=3, sticky="nsew", padx=50, pady=25)
+		
+		self.power_on_btn = tkinter.Button(
+			self.tk_root,
+			text="Turn Everything On",
+			font="MSGothic 16 bold",
+			background="#3CCB2C",
+			activebackground="#2CF516",
+			command=self.hub_controller.set_full_on_mode_type
+		)
+		self.power_on_btn.grid(row=4, column=0, rowspan=2, columnspan=3, sticky="nsew", padx=50, pady=25)
+		
+		modes_strings = [(str(k) + ": " + v[0]) for k, v in MODES_DICT.items()]
+		self.mode_selection_dropdown_variable = tkinter.StringVar()
+		self.mode_selection_dropdown_variable.set(modes_strings[0])
+		self.mode_selection_dropdown = tkinter.OptionMenu(
+			self.tk_root,
+			self.mode_selection_dropdown_variable,
+			*modes_strings
+		)
+		self.mode_selection_dropdown.config(
+			font="MSGothic 16 bold",
+			foreground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			activeforeground=SECONDARY_TEXT_COLOR,
+			activebackground=SECONDARY_COMPONENT_COLOR
+		)
+		self.mode_selection_dropdown.grid(row=6, column=0, rowspan=2, columnspan=3, sticky="nsew", padx=50, pady=25)
+		
+		self.confirm_option_btn = tkinter.Button(
+			self.tk_root,
+			text="Confirm Mode!",
+			font="MSGothic 16 bold",
+			foreground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			activeforeground=SECONDARY_TEXT_COLOR,
+			activebackground=SECONDARY_COMPONENT_COLOR,
+			command=self._handle_mode_type_confirmation
+		)
+		self.confirm_option_btn.grid(row=8, column=0, rowspan=2, columnspan=3, sticky="nsew", padx=50, pady=25)
+		
+		#
+		# For Individual Control Mode
+		#
 		
 		self.intensity_scale_variable = tkinter.DoubleVar()
 		self.intensity_scale = tkinter.Scale(
@@ -113,41 +187,227 @@ class GUI():
 			from_=0.0,
 			to=1.0,
 			length=200,
-			width=50,
-			font="MSGothic 10 bold",
-			troughcolor=MAIN_COMPONENT_ENABLED_COLOR,
-			foreground=MAIN_TEXT_ENABLED_COLOR,
+			width=150,
+			sliderlength=70,
+			borderwidth=5,
+			font="MSGothic 16 bold",
+			troughcolor=MAIN_COMPONENT_COLOR,
+			foreground=MAIN_TEXT_COLOR,
+			label="Light Intensity:",
 			command=self._send_intensity_scale_update
 		)
-		self.intensity_scale.grid(row=7, column=2)
+		self.intensity_scale.grid(row=4, column=4, rowspan=4, columnspan=5, sticky="nsew")
+		self.mode_widgets[ModeChange.INDIVIDUAL_CONTROL].append(self.intensity_scale)
 		
-		intensity_scale_grid_info = self.intensity_scale.grid_info()
-		self.intensity_scale_label = self.main_canvas.create_text(
-			get_pixel_at(
-				intensity_scale_grid_info["row"],
-				intensity_scale_grid_info["column"],
-				screen_width,
-				screen_height,
-				dx=20
-			),
-			text="Light Intensity: ",
+		#
+		# For Morning Countdown Mode
+		#
+		
+		self.hour_scale_variable = tkinter.IntVar()
+		self.hour_scale_variable.trace("w", self._trigger_all_threshold_scale_update)
+		self.hour_scale = tkinter.Scale(
+			self.tk_root,
+			variable=self.hour_scale_variable,
+			from_=12,
+			to=1,
+			width=50,
+			sliderlength=70,
 			font="MSGothic 20 bold",
-			fill=MAIN_TEXT_ENABLED_COLOR,
-			anchor=tkinter.NE
+			troughcolor=MAIN_COMPONENT_COLOR,
+			foreground=MAIN_TEXT_COLOR
 		)
+		self.hour_scale.grid(row=2, column=2, rowspan=3, columnspan=2, sticky="nse", padx=10)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.hour_scale)
+		
+		self.minute_scale_variable = tkinter.IntVar()
+		self.minute_scale_variable.trace("w", self._trigger_all_threshold_scale_update)
+		self.minute_scale = tkinter.Scale(
+			self.tk_root,
+			variable=self.minute_scale_variable,
+			from_=59,
+			to=0,
+			width=50,
+			sliderlength=70,
+			font="MSGothic 20 bold",
+			troughcolor=MAIN_COMPONENT_COLOR,
+			foreground=MAIN_TEXT_COLOR
+		)
+		self.minute_scale.grid(row=2, column=4, rowspan=3, columnspan=2, sticky="nsw", padx=10)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.minute_scale)
+		
+		self.am_pm_variable = tkinter.StringVar()
+		self.am_pm_variable.trace("w", self._trigger_all_threshold_scale_update)
+		self.am_radio_btn = tkinter.Radiobutton(
+			self.tk_root,
+			variable=self.am_pm_variable,
+			text="AM",
+			value="AM",
+			font="MSGothic 16 bold",
+			foreground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			activeforeground=SECONDARY_TEXT_COLOR,
+			activebackground=SECONDARY_COMPONENT_COLOR,
+			indicatoron=0
+		)
+		self.am_radio_btn.grid(row=4, column=2, rowspan=2, columnspan=2, sticky="se", padx=10, pady=10)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.am_radio_btn)
+		
+		self.pm_radio_btn = tkinter.Radiobutton(
+			self.tk_root,
+			variable=self.am_pm_variable,
+			text="PM",
+			value="PM",
+			font="MSGothic 16 bold",
+			foreground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			activeforeground=SECONDARY_TEXT_COLOR,
+			activebackground=SECONDARY_COMPONENT_COLOR,
+			indicatoron=0
+		)
+		self.pm_radio_btn.grid(row=4, column=4, rowspan=2, columnspan=2, sticky="sw", padx=10, pady=10)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.pm_radio_btn)
+		
+		self.portion_for_green_frame = tkinter.Frame(self.tk_root)
+		self.portion_for_green_frame.grid(row=2, column=5, rowspan=2, columnspan=3)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.portion_for_green_frame)
+		
+		self.portion_for_green_scale_variable = tkinter.DoubleVar()
+		self.portion_for_green_scale = tkinter.Scale(
+			self.portion_for_green_frame,
+			orient=tkinter.HORIZONTAL,
+			variable=self.portion_for_green_scale_variable,
+			resolution=0.01,
+			from_=0.0,
+			to=1.0,
+			width=35,
+			sliderlength=70,
+			font="MSGothic 12 bold",
+			troughcolor="#3CCB2C",
+			foreground=MAIN_TEXT_COLOR
+		)
+		self.portion_for_green_scale_variable.trace("w", self._handle_green_threshold_scale_update)
+		self.portion_for_green_scale.grid(row=0, column=0, sticky="sew")
+		
+		self.portion_for_green_result = tkinter.Text(
+			self.portion_for_green_frame,
+			font="MSGothic 12 bold",
+			foreground=MAIN_TEXT_COLOR,
+			selectforeground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			highlightbackground=MAIN_COMPONENT_COLOR,
+			selectbackground=MAIN_COMPONENT_COLOR,
+			insertbackground=MAIN_COMPONENT_COLOR,
+			height=1,
+			width=35,
+			wrap=tkinter.NONE
+		)
+		self.portion_for_green_result.grid(row=1, column=0, sticky="new")
+		
+		self.portion_for_yellow_frame = tkinter.Frame(self.tk_root)
+		self.portion_for_yellow_frame.grid(row=4, column=5, rowspan=2, columnspan=3)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.portion_for_yellow_frame)
+		
+		self.portion_for_yellow_scale_variable = tkinter.DoubleVar()
+		self.portion_for_yellow_scale_variable.trace("w", self._handle_yellow_threshold_scale_update)
+		self.portion_for_yellow_scale = tkinter.Scale(
+			self.portion_for_yellow_frame,
+			orient=tkinter.HORIZONTAL,
+			variable=self.portion_for_yellow_scale_variable,
+			resolution=0.01,
+			from_=0.0,
+			to=1.0,
+			width=35,
+			sliderlength=70,
+			font="MSGothic 12 bold",
+			troughcolor=LIGHT_YELLOW_COLOR,
+			foreground=MAIN_TEXT_COLOR
+		)
+		self.portion_for_yellow_scale.grid(row=0, column=0, sticky="sew")
+		
+		self.portion_for_yellow_result = tkinter.Text(
+			self.portion_for_yellow_frame,
+			font="MSGothic 12 bold",
+			foreground=MAIN_TEXT_COLOR,
+			selectforeground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			highlightbackground=MAIN_COMPONENT_COLOR,
+			selectbackground=MAIN_COMPONENT_COLOR,
+			insertbackground=MAIN_COMPONENT_COLOR,
+			height=1,
+			width=35,
+			wrap=tkinter.NONE
+		)
+		self.portion_for_yellow_result.grid(row=1, column=0, sticky="new")
+		
+		self.portion_for_red_frame = tkinter.Frame(self.tk_root)
+		self.portion_for_red_frame.grid(row=6, column=5, rowspan=2, columnspan=3)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.portion_for_red_frame)
+		
+		self.portion_for_red_scale_variable = tkinter.DoubleVar()
+		self.portion_for_red_scale_variable.trace("w", self._handle_red_threshold_scale_update)
+		self.portion_for_red_scale = tkinter.Scale(
+			self.portion_for_red_frame,
+			orient=tkinter.HORIZONTAL,
+			variable=self.portion_for_red_scale_variable,
+			resolution=0.01,
+			from_=0.0,
+			to=1.0,
+			width=35,
+			sliderlength=70,
+			font="MSGothic 12 bold",
+			troughcolor="#CD2828",
+			foreground=MAIN_TEXT_COLOR
+		)
+		self.portion_for_red_scale.grid(row=0, column=0, sticky="sew")
+		
+		self.portion_for_red_result = tkinter.Text(
+			self.portion_for_red_frame,
+			font="MSGothic 12 bold",
+			foreground=MAIN_TEXT_COLOR,
+			selectforeground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			highlightbackground=MAIN_COMPONENT_COLOR,
+			selectbackground=MAIN_COMPONENT_COLOR,
+			insertbackground=MAIN_COMPONENT_COLOR,
+			height=1,
+			width=35,
+			wrap=tkinter.NONE
+		)
+		self.portion_for_red_result.grid(row=1, column=0, sticky="new")
+		
+		self.traffic_light_image = None
+		
+		self.confirm_countdown_btn = tkinter.Button(
+			self.tk_root,
+			text="Start Countdown!",
+			font="MSGothic 16 bold",
+			foreground=MAIN_TEXT_COLOR,
+			background=MAIN_COMPONENT_COLOR,
+			activeforeground=SECONDARY_TEXT_COLOR,
+			activebackground="#555555",
+			command=self._handle_countdown_confirmation
+		)
+		self.confirm_countdown_btn.grid(row=9, column=3, rowspan=2, columnspan=5, sticky="nsew", padx=10, pady=30)
+		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.confirm_countdown_btn)
+		
+		#
+		# Done
+		#
+		
+		self.initialized = True
 		
 		self.handle_mode_type_change()
 		
 		self.tk_root.attributes("-fullscreen", True)
 		self.tk_root.bind('<Escape>', self._close_window)
 		
-		self.closed_window = False
+		self.window_is_closing = False
 		self.hub_controller.start()
 	
 	def _close_window(self, event):
-		self.closed_window = True
+		self.window_is_closing = True
 		
-		self.hub_controller.mode_change_node.send_mode_type(ModeChange.FULL_OFF, False)
+		self.hub_controller.send_mode_type(ModeChange.FULL_OFF, False)
 		sleep(0.5)
 		
 		self.hub_controller.stop()
@@ -156,23 +416,133 @@ class GUI():
 	def _send_intensity_scale_update(self, event):
 		self.hub_controller.request_intensity_change(self.intensity_scale_variable.get())
 	
-	def handle_clock_change(self, day_label_text, time_label_text):
-		if self.closed_window:
-			return
-		
-		self.main_canvas.itemconfig(
-			self.current_day_label,
-			text=day_label_text
+	def _handle_generic_threshold_scale_update(
+		self,
+		portion_variable,
+		text_to_update,
+		must_be_before,
+		must_be_after
+	):
+		local_time, total_mins_remaining = self.hub_controller.get_mins_until(
+			self.hour_scale_variable.get(),
+			self.minute_scale_variable.get(),
+			self.am_pm_variable.get()
 		)
 		
-		self.main_canvas.itemconfig(
-			self.current_time_label,
-			text=time_label_text
+		mins_til_threshold = portion_variable * total_mins_remaining
+		hours_til_threshold, mins_til_threshold = divmod(mins_til_threshold, 60)
+		
+		final_hour = local_time.tm_hour + hours_til_threshold
+		final_min  = local_time.tm_min  + mins_til_threshold
+		
+		if final_min >= 60:
+			final_min  = final_min % 60
+			final_hour = final_hour + 1
+		
+		final_hour = final_hour % 24
+		
+		final_am_pm_str = "AM" if final_hour < 12 else "PM"
+		
+		final_hour = final_hour % 12
+		if final_hour == 0:
+			final_hour = 12
+		
+		final_hour_str = str(int(final_hour))
+		final_min_str  = str(int(final_min))
+		
+		if len(final_hour_str) == 1:
+			final_hour_str = "0" + final_hour_str
+		
+		if len(final_min_str) == 1:
+			final_min_str = "0" + final_min_str
+		
+		text_to_update.delete("1.0", tkinter.END)
+		text_to_update.insert(tkinter.END, final_hour_str + ":" + final_min_str + " " + final_am_pm_str)
+		
+		if must_be_before:
+			if must_be_before.get() > portion_variable:
+				must_be_before.set(portion_variable)
+		
+		if must_be_after:
+			if must_be_after.get() < portion_variable:
+				must_be_after.set(portion_variable)
+	
+	def _handle_green_threshold_scale_update(self, *args):
+		if self.initialized:
+			self._handle_generic_threshold_scale_update(
+				self.portion_for_green_scale_variable.get(),
+				self.portion_for_green_result,
+				None,
+				self.portion_for_yellow_scale_variable
+			)
+	
+	def _handle_yellow_threshold_scale_update(self, *args):
+		if self.initialized:
+			self._handle_generic_threshold_scale_update(
+				self.portion_for_yellow_scale_variable.get(),
+				self.portion_for_yellow_result,
+				self.portion_for_green_scale_variable,
+				self.portion_for_red_scale_variable
+			)
+	
+	def _handle_red_threshold_scale_update(self, *args):
+		if self.initialized:
+			self._handle_generic_threshold_scale_update(
+				self.portion_for_red_scale_variable.get(),
+				self.portion_for_red_result,
+				self.portion_for_yellow_scale_variable,
+				None
+			)
+	
+	def _trigger_all_threshold_scale_update(self, *args):
+		if self.initialized:
+			self._handle_green_threshold_scale_update()
+			self._handle_yellow_threshold_scale_update()
+			self._handle_red_threshold_scale_update()
+	
+	def _handle_mode_type_confirmation(self):
+		full_selection_string = self.mode_selection_dropdown_variable.get()
+		selection_int = int(full_selection_string[:full_selection_string.find(":")])
+		self.hub_controller.send_mode_type(selection_int, True)
+	
+	def _handle_countdown_confirmation(self):
+		threshold_times = []
+		for result in [
+			self.portion_for_green_result,
+			self.portion_for_yellow_result,
+			self.portion_for_red_result
+		]:
+			text = result.get("1.0", "end-1c")
+			colon_idx = text.find(":")
+			space_idx = text.find(" ")
+			threshold_times.append((
+				int(text[:colon_idx]),
+				int(text[colon_idx+1:space_idx]),
+				text[space_idx+1:]
+			))
+		
+		self.hub_controller.set_active_sequence_for_mode_type(
+			ModeChange.MORNING_COUNTDOWN,
+			(
+				self.hour_scale_variable.get(),
+				self.minute_scale_variable.get(),
+				self.am_pm_variable.get()
+			),
+			*threshold_times
 		)
 	
 	def do_main_loop(self):
 		self.tk_root.mainloop()
 		self.hub_controller.block_until_shutdown()
+	
+	def handle_clock_change(self, day_label_text, time_label_text):
+		if self.window_is_closing:
+			return
+		
+		self.main_canvas.itemconfig(
+			self.current_day_time_label,
+			text=day_label_text + ", " + time_label_text
+		)
 	
 	def handle_mode_type_change(self):
 		current_mode = self.hub_controller.mode_change_node.current_mode
@@ -184,25 +554,65 @@ class GUI():
 			fill=color
 		)
 		
-		if current_mode == ModeChange.INDIVIDUAL_CONTROL:
-			self.intensity_scale.config(
-				troughcolor=MAIN_COMPONENT_ENABLED_COLOR,
-				foreground=MAIN_TEXT_ENABLED_COLOR,
-				state=tkinter.NORMAL,
-				takefocus=1
-			)
-			self.main_canvas.itemconfig(
-				self.intensity_scale_label,
-				fill=MAIN_TEXT_ENABLED_COLOR
-			)
+		for k, l in self.mode_widgets.items():
+			if k == current_mode:
+				for w in l:
+					w.grid()
+			else:
+				for w in l:
+					w.grid_remove()
+		
+		if current_mode == ModeChange.MORNING_COUNTDOWN:
+			next_hour, next_min, next_am_pm = self.hub_controller.get_local_time()
+			
+			if next_min >= 45:
+				next_min = 0
+				if next_hour == 12:
+					next_hour  = 1
+					next_am_pm = "AM" if next_am_pm == "PM" else "PM"
+				else:
+					next_hour = next_hour + 1
+			else:
+				next_min = int((next_min / 15) + 1) * 15
+			
+			self.minute_scale_variable.set(next_min)
+			self.hour_scale_variable.set(next_hour)
+			self.am_pm_variable.set(next_am_pm)
+			
+			self.portion_for_green_scale_variable.set(0.30)
+			self.portion_for_yellow_scale_variable.set(0.60)
+			self.portion_for_red_scale_variable.set(0.80)
+			
+			self.draw_traffic_light_for("none")
 		else:
-			self.intensity_scale.config(
-				troughcolor=MAIN_COMPONENT_DISABLED_COLOR,
-				foreground=MAIN_TEXT_DISABLED_COLOR,
-				state=tkinter.DISABLED,
-				takefocus=0
-			)
-			self.main_canvas.itemconfig(
-				self.intensity_scale_label,
-				fill=MAIN_TEXT_DISABLED_COLOR
-			)
+			self.main_canvas.delete(TRAFFIC_LIGHT_CANVAS_IMAGE_TAG)
+	
+	def draw_traffic_light_for(self, state_str):
+		self.traffic_light_image = ImageTk.PhotoImage(generate_traffic_light_image_for(state_str))
+		self.main_canvas.create_image(
+			(self.screen_width, self.screen_height - TEXT_INDENTATION),
+			image=self.traffic_light_image,
+			anchor=tkinter.SE,
+			tags=TRAFFIC_LIGHT_CANVAS_IMAGE_TAG
+		)
+	
+	def handle_traffic_light_change(self, state):
+		if state == CountdownState.CONFIRMATION:
+			return
+		
+		state_str = None
+		
+		if state == CountdownState.TO_NONE:
+			state_str = "none"
+		elif state == CountdownState.TO_GREEN:
+			state_str = "green"
+		elif state == CountdownState.TO_YELLOW:
+			state_str = "yellow"
+		elif state == CountdownState.TO_RED:
+			state_str = "red"
+		elif state == CountdownState.TO_ALL:
+			state_str = "all"
+		else:
+			raise ValueError("Illegal countdown state: [{0}]".format(state))
+		
+		self.draw_traffic_light_for(state_str)

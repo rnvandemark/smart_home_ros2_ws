@@ -1,0 +1,5 @@
+Morning Countdown (where each "time" has an hour (1-12), a minute (0-59), and am/pm ("AM" or "PM")):
+	- objective time
+	- time to set green at
+	- time to set yellow at
+	- time to set red at

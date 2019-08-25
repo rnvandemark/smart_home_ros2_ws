@@ -21,6 +21,13 @@ setup(
         ]),
 		("lib/" + package_name + "/resources", [
             "resource/kyoto.png"
+        ]),
+		("lib/" + package_name + "/resources/traffic_lights", [
+			"resource/traffic_lights/traffic_light_none.png",
+			"resource/traffic_lights/traffic_light_green.png",
+			"resource/traffic_lights/traffic_light_yellow.png",
+			"resource/traffic_lights/traffic_light_red.png",
+			"resource/traffic_lights/traffic_light_all.png"
         ])
 	],
 	install_requires=["setuptools"],

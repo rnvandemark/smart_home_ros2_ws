@@ -19,6 +19,7 @@ rosidl_generate_interfaces(smart_home_msgs
 	"msg/ModeChange.msg"
 	"msg/ModeChangeRequest.msg"
 	"msg/DeviceActivationChange.msg"
+	"msg/CountdownState.msg"
 	DEPENDENCIES std_msgs
 )
 

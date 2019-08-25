@@ -1,4 +1,4 @@
-ROS Node over WiFi with WiFi Shield
+ROS Node over WiFi to Arduino with WiFi Shield
 https://answers.ros.org/question/232774/launch-a-ros-node-over-wifi/
 
 Arduino over WiFi
@@ -7,5 +7,5 @@ https://arduino.stackexchange.com/questions/432/how-can-i-connect-to-an-arduino-
 ESP8266 WiFi module
 https://www.sparkfun.com/products/13678
 
-TKinter references
-http://effbot.org/tkinterbook/tkinter-hello-tkinter.htm
+Arduino with ROS2?
+https://www.arduinolibraries.info/libraries/ros2arduino
