@@ -7,6 +7,10 @@ from smart_home_msgs.msg import ModeChange, CountdownState
 
 from SmartHomeHubController import SmartHomeHubController
 
+#
+# Constants
+#
+
 LIGHT_YELLOW_COLOR = "#F0E68C"
 
 MODES_DICT = {
@@ -32,23 +36,50 @@ TRAFFIC_LIGHT_CANVAS_IMAGE_TAG = "traffic_light_canvas_image"
 
 HUB_INSTALL_LIB_DIRECTORY = get_package_prefix("hub")
 
+#
+# Global functions
+#
+
+## Given a smart home mode, get a user-friendly name and a color code for it.
+#
+#  @param val The key in the dictionary.
+#  @return A tuple of the name and color code.
 def get_mode_characteristics(val):
 	if val in MODES_DICT:
 		return MODES_DICT[val]
 	else:
 		return ("UNDEFINED", "#FF0000")
 
+## Access a resource in the installation library.
+#
+#  @param url_suffix The name of the directory and file to access.
+#  @return The absolute URL of the desired resource.
 def get_resource_url(url_suffix):
 	return HUB_INSTALL_LIB_DIRECTORY + "/lib/hub/resources/" + url_suffix
-	
-def get_traffic_light_url_for(state):
-	return get_resource_url("traffic_lights/traffic_light_{0}.png".format(state))
 
+## Given one of the states that the traffic light can be in, get that corresponding image.
+#
+#  @param state The state of the light. This can be a string of one of the following values:
+#    "none", "green", "yellow", "red", or "all"
+#  @return The desired resource as a PIL Image.
 def generate_traffic_light_image_for(state):
-	return Image.open(get_traffic_light_url_for(state)).resize((200, 500), Image.ANTIALIAS)
+	return Image.open(
+		get_resource_url("traffic_lights/traffic_light_{0}.png".format(state))
+	).resize((200, 500), Image.ANTIALIAS)
 
+#
+# Class definition
+#
+
+## The class encapsulating the display for the app's contents.
 class GUI():
 	
+	## The constructor. Performs a lot of initialization for graphics, for all
+	#  of the supported modes.
+	#
+	#  @param self The object pointer.
+	#  @param args The program arguments, which are passed on to the ROS client
+	#  library's initialization.
 	def __init__(self, args):
 		self.initialized = False
 		
@@ -404,6 +435,10 @@ class GUI():
 		self.window_is_closing = False
 		self.hub_controller.start()
 	
+	## The routine to perform when the window received a close event/request.
+	#
+	#  @param self The object pointer.
+	#  @param event The event describing the close request. This value is unused.
 	def _close_window(self, event):
 		self.window_is_closing = True
 		
@@ -413,9 +448,25 @@ class GUI():
 		self.hub_controller.stop()
 		self.tk_root.destroy()
 	
+	## Queue a normalized intensity value. This is called whenever the double variable
+	#  mapped to the scale is changed.
+	#
+	#  @param self The object pointer.
+	#  @param event The event describing the value change. This value is unused.
 	def _send_intensity_scale_update(self, event):
 		self.hub_controller.request_intensity_change(self.intensity_scale_variable.get())
 	
+	## Handle when one of the three traffic light time threshold scales change. This is
+	#  called by one of the three event handlers for each of the green, yellow, and red
+	#  scales.
+	#
+	#  @param self The object pointer.
+	#  @param portion_variable The variable mapped to the scale's value.
+	#  @param text_to_update The resulting time to format.
+	#  @param must_be_before The variable mapped to the scale that must correspond to a
+	#  time before the value described by portion_variable.
+	#  @param must_be_after The variable mapped to the scale that must correspond to a
+	#  time after the value described by portion_variable.
 	def _handle_generic_threshold_scale_update(
 		self,
 		portion_variable,
@@ -467,6 +518,10 @@ class GUI():
 			if must_be_after.get() < portion_variable:
 				must_be_after.set(portion_variable)
 	
+	## The event callback for if the threshold corresponding to the green light is changed.
+	#
+	#  @param self The object pointer.
+	#  @param args The event arguments. This value is unused.
 	def _handle_green_threshold_scale_update(self, *args):
 		if self.initialized:
 			self._handle_generic_threshold_scale_update(
@@ -476,6 +531,10 @@ class GUI():
 				self.portion_for_yellow_scale_variable
 			)
 	
+	## The event callback for if the threshold corresponding to the yellow light is changed.
+	#
+	#  @param self The object pointer.
+	#  @param args The event arguments. This value is unused.
 	def _handle_yellow_threshold_scale_update(self, *args):
 		if self.initialized:
 			self._handle_generic_threshold_scale_update(
@@ -485,6 +544,10 @@ class GUI():
 				self.portion_for_red_scale_variable
 			)
 	
+	## The event callback for if the threshold corresponding to the red light is changed.
+	#
+	#  @param self The object pointer.
+	#  @param args The event arguments. This value is unused.
 	def _handle_red_threshold_scale_update(self, *args):
 		if self.initialized:
 			self._handle_generic_threshold_scale_update(
@@ -494,17 +557,30 @@ class GUI():
 				None
 			)
 	
+	## Handler for when the event that triggers all of the variables corresponding to any
+	#  light to be updated.
+	#
+	#  @param self The object pointer.
+	#  @param args The event arguments. This value is unused.
 	def _trigger_all_threshold_scale_update(self, *args):
 		if self.initialized:
 			self._handle_green_threshold_scale_update()
 			self._handle_yellow_threshold_scale_update()
 			self._handle_red_threshold_scale_update()
 	
+	## Handler for when the event that triggers when a new mode type is confirmed with the
+	#  submit button.
+	#
+	#  @param self The object pointer.
 	def _handle_mode_type_confirmation(self):
 		full_selection_string = self.mode_selection_dropdown_variable.get()
 		selection_int = int(full_selection_string[:full_selection_string.find(":")])
 		self.hub_controller.send_mode_type(selection_int, True)
 	
+	## Handler for when the light thresholds are confirmed and submitted. This sets the
+	#  controller's active mode and passes on the times selected.
+	#
+	#  @param self The object pointer.
 	def _handle_countdown_confirmation(self):
 		threshold_times = []
 		for result in [
@@ -531,10 +607,19 @@ class GUI():
 			*threshold_times
 		)
 	
+	## This starts the Tkinter main loop, and then blocks until the shutdown sequence has
+	#  started by attempting to join all of the active threads.
+	#
+	#  @param self The object pointer.
 	def do_main_loop(self):
 		self.tk_root.mainloop()
 		self.hub_controller.block_until_shutdown()
 	
+	## The callback for the controller's dedicated to updating the clock.
+	#
+	#  @param self The object pointer.
+	#  @param day_label_text The new text to display for the day.
+	#  @param time_label_text The new text to display for the time.
 	def handle_clock_change(self, day_label_text, time_label_text):
 		if self.window_is_closing:
 			return
@@ -544,6 +629,9 @@ class GUI():
 			text=day_label_text + ", " + time_label_text
 		)
 	
+	## The callback to change the visible widgets when the mdode type changes.
+	#
+	#  @param self The object pointer.
 	def handle_mode_type_change(self):
 		current_mode = self.hub_controller.mode_change_node.current_mode
 		text, color  = get_mode_characteristics(current_mode)
@@ -587,6 +675,10 @@ class GUI():
 		else:
 			self.main_canvas.delete(TRAFFIC_LIGHT_CANVAS_IMAGE_TAG)
 	
+	## Depending on the countdown state, draw the corresponding traffic light image.
+	#
+	#  @param self The object pointer.
+	#  @param state_str A string describing the current state.
 	def draw_traffic_light_for(self, state_str):
 		self.traffic_light_image = ImageTk.PhotoImage(generate_traffic_light_image_for(state_str))
 		self.main_canvas.create_image(
@@ -596,6 +688,10 @@ class GUI():
 			tags=TRAFFIC_LIGHT_CANVAS_IMAGE_TAG
 		)
 	
+	## Given the countdown state code, draw the proper image for the traffic light.
+	#
+	#  @param self The object pointer.
+	#  @param state The ROS constant describing the new state.
 	def handle_traffic_light_change(self, state):
 		if state == CountdownState.CONFIRMATION:
 			return
