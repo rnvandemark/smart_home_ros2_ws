@@ -5,7 +5,7 @@ from time import sleep
 from ament_index_python.packages import get_package_prefix
 from smart_home_msgs.msg import ModeChange, CountdownState
 
-from SmartHomeHubController import SmartHomeHubController
+from SmartHomeHubController import SmartHomeHubController, WAVE_PERIOD_DEFAULT_S
 
 #
 # Constants
@@ -422,6 +422,32 @@ class GUI():
 		self.mode_widgets[ModeChange.MORNING_COUNTDOWN].append(self.confirm_countdown_btn)
 		
 		#
+		# For Wave Mode
+		#
+		
+		self.wave_update_scale_variable = tkinter.DoubleVar()
+		self.wave_update_scale_variable.set(WAVE_PERIOD_DEFAULT_S)
+		self.wave_update_scale = tkinter.Scale(
+			self.tk_root,
+			orient=tkinter.HORIZONTAL,
+			variable=self.wave_update_scale_variable,
+			resolution=0.01,
+			from_=0.1,
+			to=60.0,
+			length=200,
+			width=150,
+			sliderlength=70,
+			borderwidth=5,
+			font="MSGothic 16 bold",
+			troughcolor=MAIN_COMPONENT_COLOR,
+			foreground=MAIN_TEXT_COLOR,
+			label="Wave Period:",
+			command=self._send_wave_update_scale_update
+		)
+		self.wave_update_scale.grid(row=4, column=4, rowspan=4, columnspan=5, sticky="nsew")
+		self.mode_widgets[ModeChange.WAVE].append(self.wave_update_scale)
+		
+		#
 		# Done
 		#
 		
@@ -455,6 +481,14 @@ class GUI():
 	#  @param event The event describing the value change. This value is unused.
 	def _send_intensity_scale_update(self, event):
 		self.hub_controller.request_intensity_change(self.intensity_scale_variable.get())
+	
+	## Queue a wave period value. This is called whenever the double variable
+	#  mapped to the scale is changed.
+	#
+	#  @param self The object pointer.
+	#  @param event The event describing the value change. This value is unused.
+	def _send_wave_update_scale_update(self, event):
+		self.hub_controller.request_wave_update_change(self.wave_update_scale_variable.get())
 	
 	## Handle when one of the three traffic light time threshold scales change. This is
 	#  called by one of the three event handlers for each of the green, yellow, and red
@@ -633,7 +667,7 @@ class GUI():
 	#
 	#  @param self The object pointer.
 	def handle_mode_type_change(self):
-		current_mode = self.hub_controller.mode_change_node.current_mode
+		current_mode = self.hub_controller.hub_node.current_mode
 		text, color  = get_mode_characteristics(current_mode)
 		
 		self.main_canvas.itemconfig(

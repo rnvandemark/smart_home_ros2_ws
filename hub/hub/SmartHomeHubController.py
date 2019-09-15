@@ -2,6 +2,8 @@ from rclpy import init, spin, shutdown
 from threading import Thread, Lock
 from time import sleep, localtime, strftime
 from datetime import datetime, timedelta
+from math import cos as cosine
+from math import pi as PI
 
 from smart_home_msgs.msg import ModeChange, CountdownState
 
@@ -11,10 +13,14 @@ from SmartHomeHubNode import SmartHomeHubNode
 # Constants
 #
 
-INTENSITY_CHANGE_WAIT_TIME_S    = 0.1
+BATCHING_WAIT_TIME_S            = 0.1
 CLOCK_UPDATE_WAIT_TIME_S        = 0.5
 TRAFFIC_LIGHT_FLASH_WAIT_TIME_S = 0.5
 TRAFFIC_LIGHT_FLASH_COUNT       = 3
+WAVE_PERIOD_DEFAULT_S           = 10.0
+WAVE_UPDATE_WAIT_TIME_S         = 0.03333
+WAVE_NEGLIGIBLE_THRESHOLD       = 0.01
+_2PI                            = 2 * PI
 
 MONTH_ABBREVIATIONS = {
 	1: "Jan",  2: "Feb",  3: "Mar",  4: "Apr",
@@ -77,24 +83,33 @@ class SmartHomeHubController():
 		
 		self.clock_update_thread        = Thread(target=self._do_clock_updates)
 		self.intensity_check_thread     = Thread(target=self._do_intensity_batching)
+		self.wave_update_check_thread   = Thread(target=self._do_wave_update_batching)
+		self.wave_processing_thread     = Thread(target=self._do_wave_processing)
 		self.traffic_light_flash_thread = None
 		
 		self.clock_update_handler = clock_update_handler
 		
-		self.intensity_change_mutex = Lock()
+		self.intensity_change_mutex  = Lock()
 		self.queued_intensity_change = None
 		
+		self.wave_update_change_mutex  = Lock()
+		self.queued_wave_update_change = None
+		self.wave_period               = WAVE_PERIOD_DEFAULT_S
+		self.wave_position             = 0.0
+		
+		self.wave_position_increment = None
+		self._set_wave_position_increment()
+		
 		init(args=args)
-		self.mode_change_node = SmartHomeHubNode(mode_type_change_handler, traffic_light_change_handler)
+		self.hub_node = SmartHomeHubNode(mode_type_change_handler, traffic_light_change_handler)
 	
 	## The routine for the spin thread to perform.
 	#
 	#  @param self The object pointer.
-	#  light is in.
 	def _do_spin(self):
-		self.mode_change_node.get_logger().info("Starting spin routine.")
-		spin(self.mode_change_node)
-		self.mode_change_node.get_logger().info("Exiting spin routine.")
+		self.hub_node.get_logger().info("Starting spin routine.")
+		spin(self.hub_node)
+		self.hub_node.get_logger().info("Exiting spin routine.")
 	
 	## The routine for the clock udpate thread to perform.
 	#
@@ -113,16 +128,59 @@ class SmartHomeHubController():
 	#  @param self The object pointer.
 	def _do_intensity_batching(self):
 		while self.keep_peripheral_threads_alive:
-			if self.mode_change_node.current_mode == ModeChange.INDIVIDUAL_CONTROL:
+			if self.hub_node.current_mode == ModeChange.INDIVIDUAL_CONTROL:
 				self.intensity_change_mutex.acquire()
 				try:
 					if self.queued_intensity_change != None:
-						self.mode_change_node.send_intensity_change(self.queued_intensity_change)
+						self.hub_node.send_intensity_change(self.queued_intensity_change)
 						self.queued_intensity_change = None
 				finally:
 					self.intensity_change_mutex.release()
 			
-			sleep(INTENSITY_CHANGE_WAIT_TIME_S)
+			sleep(BATCHING_WAIT_TIME_S)
+	
+	## The routine for the wave revolution period change queuing thread to perform.
+	#
+	#  @param self The object pointer.
+	def _do_wave_update_batching(self):
+		while self.keep_peripheral_threads_alive:
+			if self.hub_node.current_mode == ModeChange.WAVE:
+				self.wave_update_change_mutex.acquire()
+				try:
+					if self.queued_wave_update_change != None:
+						self.wave_period = self.queued_wave_update_change
+						self._set_wave_position_increment()
+						self.queued_wave_update_change = None
+				finally:
+					self.wave_update_change_mutex.release()
+			
+			sleep(BATCHING_WAIT_TIME_S)
+	
+	## The routine for the wave revolution period change queuing thread to perform.
+	#
+	#  @param self The object pointer.
+	def _do_wave_processing(self):
+		while self.keep_peripheral_threads_alive:
+			if self.hub_node.current_mode == ModeChange.WAVE:
+				self.wave_update_change_mutex.acquire()
+				try:
+					self.wave_position = self.wave_position + self.wave_position_increment
+					if self.wave_position >= _2PI:
+						self.wave_position = 0.0
+					
+					id_intensity_pairs = []
+					for participant in self.hub_node.participant_locations:
+						intensity = cosine(participant[1] - self.wave_position)
+						if intensity < WAVE_NEGLIGIBLE_THRESHOLD:
+							intensity = 0.0
+						
+						id_intensity_pairs.append((participant[0], intensity))
+					
+					self.hub_node.send_wave_update(id_intensity_pairs)
+				finally:
+					self.wave_update_change_mutex.release()
+			
+			sleep(WAVE_UPDATE_WAIT_TIME_S)
 	
 	## The routine for the clock update thread to perform.
 	#
@@ -132,16 +190,16 @@ class SmartHomeHubController():
 			if not self.keep_peripheral_threads_alive:
 				break
 			
-			self.mode_change_node.send_countdown_state(CountdownState.TO_ALL)
+			self.hub_node.send_countdown_state(CountdownState.TO_ALL)
 			sleep(TRAFFIC_LIGHT_FLASH_WAIT_TIME_S)
-			self.mode_change_node.send_countdown_state(CountdownState.TO_NONE)
+			self.hub_node.send_countdown_state(CountdownState.TO_NONE)
 			sleep(TRAFFIC_LIGHT_FLASH_WAIT_TIME_S)
 		
-		obj_time, green_time, yellow_time, red_time = self.mode_change_node.active_mode_sequence_characteristics[1:5]
+		obj_time, green_time, yellow_time, red_time = self.hub_node.active_mode_sequence_characteristics[1:5]
 		last_countdown_state_sent = CountdownState.TO_NONE
 		is_past_obj_time = False
 		while (self.keep_peripheral_threads_alive
-				and (self.mode_change_node.active_mode_sequence_characteristics[0] == ModeChange.MORNING_COUNTDOWN)):
+				and (self.hub_node.active_mode_sequence_characteristics[0] == ModeChange.MORNING_COUNTDOWN)):
 			local_time = self.get_local_time()
 			
 			if local_time == obj_time:
@@ -149,33 +207,33 @@ class SmartHomeHubController():
 				break
 			elif local_time == red_time:
 				if last_countdown_state_sent != CountdownState.TO_RED:
-					self.mode_change_node.send_countdown_state(CountdownState.TO_RED)
+					self.hub_node.send_countdown_state(CountdownState.TO_RED)
 					last_countdown_state_sent = CountdownState.TO_RED
 			elif local_time == yellow_time:
 				if ((last_countdown_state_sent != CountdownState.TO_YELLOW)
 						and (last_countdown_state_sent != CountdownState.TO_RED)):
-					self.mode_change_node.send_countdown_state(CountdownState.TO_YELLOW)
+					self.hub_node.send_countdown_state(CountdownState.TO_YELLOW)
 					last_countdown_state_sent = CountdownState.TO_YELLOW
 			elif local_time == green_time:
 				if ((last_countdown_state_sent != CountdownState.TO_GREEN)
 						and (last_countdown_state_sent != CountdownState.TO_YELLOW)
 						and (last_countdown_state_sent != CountdownState.TO_RED)):
-					self.mode_change_node.send_countdown_state(CountdownState.TO_GREEN)
+					self.hub_node.send_countdown_state(CountdownState.TO_GREEN)
 					last_countdown_state_sent = CountdownState.TO_GREEN
 			
 			sleep(1)
 		
 		if is_past_obj_time:
 			while (self.keep_peripheral_threads_alive
-					and (self.mode_change_node.active_mode_sequence_characteristics[0] == ModeChange.MORNING_COUNTDOWN)):
-				self.mode_change_node.send_countdown_state(CountdownState.TO_RED)
+					and (self.hub_node.active_mode_sequence_characteristics[0] == ModeChange.MORNING_COUNTDOWN)):
+				self.hub_node.send_countdown_state(CountdownState.TO_RED)
 				sleep(TRAFFIC_LIGHT_FLASH_WAIT_TIME_S)
 				
 				if not (self.keep_peripheral_threads_alive
-					and (self.mode_change_node.active_mode_sequence_characteristics[0] == ModeChange.MORNING_COUNTDOWN)):
+					and (self.hub_node.active_mode_sequence_characteristics[0] == ModeChange.MORNING_COUNTDOWN)):
 					break
 				
-				self.mode_change_node.send_countdown_state(CountdownState.TO_NONE)
+				self.hub_node.send_countdown_state(CountdownState.TO_NONE)
 				sleep(TRAFFIC_LIGHT_FLASH_WAIT_TIME_S)
 	
 	## The routine for the traffic light state update thread to perform.
@@ -185,11 +243,19 @@ class SmartHomeHubController():
 		self.traffic_light_flash_thread = Thread(target=self._do_traffic_light_monitoring)
 		self.traffic_light_flash_thread.start()
 	
+	## A helper function to set the wave mode's position incrementer based on the period and "framerate".
+	#
+	#  @param self The object pointer.
+	def _set_wave_position_increment(self):
+		self.wave_position_increment = (1.0 / self.wave_period) * WAVE_UPDATE_WAIT_TIME_S * _2PI
+	
 	## Starts the threads that are to always be active.
 	#
 	#  @param self The object pointer.
 	def start(self):
 		self.spin_thread.start()
+		self.wave_processing_thread.start()
+		self.wave_update_check_thread.start()
 		self.intensity_check_thread.start()
 		self.clock_update_thread.start()
 	
@@ -199,6 +265,8 @@ class SmartHomeHubController():
 	def block_until_shutdown(self):
 		self.clock_update_thread.join()
 		self.intensity_check_thread.join()
+		self.wave_update_check_thread.join()
+		self.wave_processing_thread.join()
 		
 		if self.traffic_light_flash_thread:
 			self.traffic_light_flash_thread.join()
@@ -211,8 +279,8 @@ class SmartHomeHubController():
 	def stop(self):
 		self.keep_peripheral_threads_alive = False
 		
-		self.mode_change_node.get_logger().info("Doing destruction.")
-		self.mode_change_node.destroy_node()
+		self.hub_node.get_logger().info("Doing destruction.")
+		self.hub_node.destroy_node()
 		shutdown()
 	
 	## Formats the current local time into hours, minutes, and AM/PM.
@@ -242,14 +310,26 @@ class SmartHomeHubController():
 		finally:
 			self.intensity_change_mutex.release()
 	
+	## Attempts to take a wave period change that was requested to be sent and attempts to prioritize it. This
+	#  will lock the mutex and then set the wave period value, so as to guarantee the updating thread isn't interrupted.
+	#
+	#  @param self The object pointer.
+	#  @param wave_update The wave period to be queued, from 1 (once a minute) to 60 (once an hour).
+	def request_wave_update_change(self, wave_update):
+		self.wave_update_change_mutex.acquire()
+		try:
+			self.queued_wave_update_change = wave_update
+		finally:
+			self.wave_update_change_mutex.release()
+	
 	## Tells the node to inform the ROS network of a mode change.
 	#
 	#  @param self The object pointer.
 	#  @param mode_type The mode type ROS constant that is not active.
 	#  @param call_handler Whether or not to call the GUI's bounded handler.
 	def send_mode_type(self, mode_type, call_handler):
-		self.mode_change_node.active_mode_sequence_characteristics = (-1,)
-		self.mode_change_node.send_mode_type(mode_type, call_handler)
+		self.hub_node.active_mode_sequence_characteristics = (-1,)
+		self.hub_node.send_mode_type(mode_type, call_handler)
 	
 	## A helper function to set the mode to FULL_ON and call the handler.
 	#
@@ -270,13 +350,13 @@ class SmartHomeHubController():
 	#  @param characteristics Any values/parameters that are important to know for the new mode type.
 	def set_active_sequence_for_mode_type(self, mode_type, *characteristics):
 		if self.traffic_light_flash_thread:
-			self.mode_change_node.active_mode_sequence_characteristics = (-1,)
+			self.hub_node.active_mode_sequence_characteristics = (-1,)
 			self.traffic_light_flash_thread.join()
 		
-		self.mode_change_node.active_mode_sequence_characteristics = (mode_type, *characteristics)
+		self.hub_node.active_mode_sequence_characteristics = (mode_type, *characteristics)
 		
 		if mode_type == ModeChange.MORNING_COUNTDOWN:
-			self.mode_change_node.send_countdown_state(CountdownState.CONFIRMATION)
+			self.hub_node.send_countdown_state(CountdownState.CONFIRMATION)
 			self._trigger_traffic_light_monitoring()
 	
 	## Calculate the number of minutes until a provided time is reached.
