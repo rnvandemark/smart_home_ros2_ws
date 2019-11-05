@@ -16,6 +16,7 @@ find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(smart_home_msgs
+	"msg/Float32Arr.msg"
 	"msg/ModeChange.msg"
 	"msg/ModeChangeRequest.msg"
 	"msg/DeviceActivationChange.msg"

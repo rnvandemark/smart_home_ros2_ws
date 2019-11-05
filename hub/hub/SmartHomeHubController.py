@@ -1,13 +1,16 @@
-from rclpy import init, spin, shutdown
-from threading import Thread, Lock
 from time import sleep, localtime, strftime
+from math import cos as cosine, pi as PI
 from datetime import datetime, timedelta
-from math import cos as cosine
-from math import pi as PI
+from threading import Thread, Lock
+
+import matplotlib.pyplot as plt
+
+from rclpy import init, spin, shutdown
 
 from smart_home_msgs.msg import ModeChange, CountdownState
 
 from SmartHomeHubNode import SmartHomeHubNode
+#from AudioHandler import AudioHandler
 
 #
 # Constants
@@ -20,6 +23,8 @@ TRAFFIC_LIGHT_FLASH_COUNT       = 3
 WAVE_PERIOD_DEFAULT_S           = 10.0
 WAVE_UPDATE_WAIT_TIME_S         = 0.03333
 WAVE_NEGLIGIBLE_THRESHOLD       = 0.01
+AUDIO_PROCESSING_WAIT_TIME_S    = 0.1
+AUDIO_PROCESSING_FRAME_COUNT    = 32
 _2PI                            = 2 * PI
 
 MONTH_ABBREVIATIONS = {
@@ -77,15 +82,17 @@ class SmartHomeHubController():
 	#  @param traffic_light_change_handler The function callback for the node to tell what state the traffic
 	#  light is in.
 	def __init__(self, args, clock_update_handler, mode_type_change_handler, traffic_light_change_handler):
-		self.spin_thread = Thread(target=self._do_spin)
-		
 		self.keep_peripheral_threads_alive = True
 		
-		self.clock_update_thread        = Thread(target=self._do_clock_updates)
-		self.intensity_check_thread     = Thread(target=self._do_intensity_batching)
-		self.wave_update_check_thread   = Thread(target=self._do_wave_update_batching)
-		self.wave_processing_thread     = Thread(target=self._do_wave_processing)
-		self.traffic_light_flash_thread = None
+		self.spin_thread                   = Thread(target=self._do_spin)
+		self.clock_update_thread           = Thread(target=self._do_clock_updates)
+		self.intensity_check_thread        = Thread(target=self._do_intensity_batching)
+		self.local_audio_processing_thread = Thread(target=self._do_local_audio_processing)
+		self.wave_update_check_thread      = Thread(target=self._do_wave_update_batching)
+		self.wave_processing_thread        = Thread(target=self._do_wave_processing)
+		self.traffic_light_flash_thread    = None
+		
+		#self.audio_handler = AudioHandler()
 		
 		self.clock_update_handler = clock_update_handler
 		
@@ -139,6 +146,16 @@ class SmartHomeHubController():
 			
 			sleep(BATCHING_WAIT_TIME_S)
 	
+	## The routine to perform handling and processing for the audio coming out of the hub's speakers.
+	#
+	#  @param self The object pointer.
+	def _do_local_audio_processing(self):
+		while self.keep_peripheral_threads_alive:
+			if self.hub_node.current_mode == ModeChange.FOLLOW_COMPUTER_SOUND:
+				sleep(AUDIO_PROCESSING_WAIT_TIME_S)
+			else:
+				sleep(AUDIO_PROCESSING_WAIT_TIME_S)
+	
 	## The routine for the wave revolution period change queuing thread to perform.
 	#
 	#  @param self The object pointer.
@@ -165,16 +182,16 @@ class SmartHomeHubController():
 				self.wave_update_change_mutex.acquire()
 				try:
 					self.wave_position = self.wave_position + self.wave_position_increment
-					if self.wave_position >= _2PI:
-						self.wave_position = 0.0
+					while self.wave_position >= _2PI:
+						self.wave_position = self.wave_position - _2PI
 					
 					id_intensity_pairs = []
-					for participant in self.hub_node.participant_locations:
-						intensity = cosine(participant[1] - self.wave_position)
+					for p_id, p_location in self.hub_node.participant_locations:
+						intensity = cosine(p_location - self.wave_position)
 						if intensity < WAVE_NEGLIGIBLE_THRESHOLD:
 							intensity = 0.0
 						
-						id_intensity_pairs.append((participant[0], intensity))
+						id_intensity_pairs.append((p_id, intensity))
 					
 					self.hub_node.send_wave_update(id_intensity_pairs)
 				finally:
@@ -254,19 +271,24 @@ class SmartHomeHubController():
 	#  @param self The object pointer.
 	def start(self):
 		self.spin_thread.start()
+		self.local_audio_processing_thread.start()
 		self.wave_processing_thread.start()
 		self.wave_update_check_thread.start()
 		self.intensity_check_thread.start()
 		self.clock_update_thread.start()
+		
+		#self.audio_handler.start()
 	
 	## A blocking function that unblocks when the application is shutting down.
 	#
 	#  @param self The object pointer.
 	def block_until_shutdown(self):
+		#self.audio_handler.join()
 		self.clock_update_thread.join()
 		self.intensity_check_thread.join()
 		self.wave_update_check_thread.join()
 		self.wave_processing_thread.join()
+		self.local_audio_processing_thread.join()
 		
 		if self.traffic_light_flash_thread:
 			self.traffic_light_flash_thread.join()
@@ -278,6 +300,7 @@ class SmartHomeHubController():
 	#  @param self The object pointer.
 	def stop(self):
 		self.keep_peripheral_threads_alive = False
+		#self.audio_handler.stop()
 		
 		self.hub_node.get_logger().info("Doing destruction.")
 		self.hub_node.destroy_node()
@@ -314,7 +337,7 @@ class SmartHomeHubController():
 	#  will lock the mutex and then set the wave period value, so as to guarantee the updating thread isn't interrupted.
 	#
 	#  @param self The object pointer.
-	#  @param wave_update The wave period to be queued, from 1 (once a minute) to 60 (once an hour).
+	#  @param wave_update The wave period to be queued, from 1 (once a min) to 60 (once every 60 mins / once an hour).
 	def request_wave_update_change(self, wave_update):
 		self.wave_update_change_mutex.acquire()
 		try:
@@ -325,11 +348,15 @@ class SmartHomeHubController():
 	## Tells the node to inform the ROS network of a mode change.
 	#
 	#  @param self The object pointer.
-	#  @param mode_type The mode type ROS constant that is not active.
+	#  @param new_mode_type The mode type ROS constant that is not active.
 	#  @param call_handler Whether or not to call the GUI's bounded handler.
-	def send_mode_type(self, mode_type, call_handler):
+	def send_mode_type(self, new_mode_type, call_handler):
+		previous_mode_type = self.hub_node.current_mode
+		
 		self.hub_node.active_mode_sequence_characteristics = (-1,)
-		self.hub_node.send_mode_type(mode_type, call_handler)
+		self.hub_node.send_mode_type(new_mode_type, call_handler)
+		
+		#self.audio_handler.set_collection_status(new_mode_type == ModeChange.FOLLOW_COMPUTER_SOUND)
 	
 	## A helper function to set the mode to FULL_ON and call the handler.
 	#
@@ -343,7 +370,7 @@ class SmartHomeHubController():
 	def set_full_off_mode_type(self):
 		self.send_mode_type(ModeChange.FULL_OFF, True)
 	
-	## A helper function to set the mode to FULL_OFF and call the handler.
+	## Set the active characteristics for the newly set mode type and perform any setup for it.
 	#
 	#  @param self The object pointer.
 	#  @param mode_type The ROS constant for the mode type.

@@ -1,8 +1,14 @@
-from rclpy.node import Node
 from math import pi as PI
 
+from rclpy.node import Node
+
 from std_msgs.msg import Empty, UInt8, Float32
-from smart_home_msgs.msg import ModeChange, ModeChangeRequest, DeviceActivationChange, CountdownState, WaveParticipantLocation, WaveUpdate
+from smart_home_msgs.msg import										\
+		ModeChange, ModeChangeRequest, DeviceActivationChange,		\
+		CountdownState, WaveParticipantLocation, WaveUpdate,		\
+		Float32Arr
+
+MAX_AUX_DEVICE_COUNT = 32
 
 #
 # Class definitions
@@ -32,10 +38,10 @@ class SmartHomeHubNode(Node):
 			1
 		)
 		
-		self.start_wave_mode_pub = self.create_publisher(
-			Empty,
-			"/smart_home/start_wave_mode_chatter",
-			1
+		self.device_activation_change_pub = self.create_publisher(
+			DeviceActivationChange,
+			"/smart_home/device_activation_change_chatter",
+			MAX_AUX_DEVICE_COUNT
 		)
 		
 		self.intensity_change_pub = self.create_publisher(
@@ -44,22 +50,28 @@ class SmartHomeHubNode(Node):
 			1
 		)
 		
-		self.wave_update_pub = self.create_publisher(
-			WaveUpdate,
-			"/smart_home/wave_update_chatter",
-			128
-		)
-		
-		self.device_activation_change_pub = self.create_publisher(
-			DeviceActivationChange,
-			"/smart_home/device_activation_change_chatter",
-			32
-		)
-		
 		self.countdown_state_pub = self.create_publisher(
 			CountdownState,
 			"/smart_home/countdown_state_chatter",
-			4
+			1
+		)
+		
+		self.active_frequencies_pub = self.create_publisher(
+			Float32Arr,
+			"/smart_home/active_frequencies_chatter",
+			1
+		)
+		
+		self.start_wave_mode_pub = self.create_publisher(
+			Empty,
+			"/smart_home/start_wave_mode_chatter",
+			1
+		)
+		
+		self.wave_update_pub = self.create_publisher(
+			WaveUpdate,
+			"/smart_home/wave_update_chatter",
+			MAX_AUX_DEVICE_COUNT
 		)
 		
 		#
@@ -73,18 +85,18 @@ class SmartHomeHubNode(Node):
 			1
 		)
 		
-		self.participant_location_sub = self.create_subscription(
-			WaveParticipantLocation,
-			"/smart_home/wave_participant_location_chatter",
-			self.participant_location_callback,
-			32
-		)
-		
 		self.countdown_state_sub = self.create_subscription(
 			CountdownState,
 			"/smart_home/countdown_state_chatter",
 			self.countdown_state_callback,
-			4
+			1
+		)
+		
+		self.participant_location_sub = self.create_subscription(
+			WaveParticipantLocation,
+			"/smart_home/wave_participant_location_chatter",
+			self.participant_location_callback,
+			MAX_AUX_DEVICE_COUNT
 		)
 		
 		#
@@ -121,7 +133,7 @@ class SmartHomeHubNode(Node):
 	#  @param self The object pointer.
 	#  @param msg The ROS message describing an appliance participating in the wave along with its location.
 	def participant_location_callback(self, msg):
-		self.traffic_light_change_handler((msg.participant_id, msg.position * PI / 180.0))
+		raise NotImplementedError()
 	
 	## The routine to take the provided mode type ROS constant and send a new message.
 	#
@@ -149,20 +161,6 @@ class SmartHomeHubNode(Node):
 	## A helper function to package the batched intensity and publish it to the ROS network.
 	#
 	#  @param self The object pointer.
-	#  @param id_intensity_pairs A list of tuples of size 2, containing the participant IDs and their
-	#  corresponding intensities.
-	def send_wave_update(self, id_intensity_pairs):
-		wave_update_msg = WaveUpdate()
-		
-		for pair in id_intensity_pairs:
-			wave_update_msg.participant_ids.append(pair[0])
-			wave_update_msg.intensities.append(pair[1])
-		
-		self.wave_update_pub.publish(wave_update_msg)
-	
-	## A helper function to package the batched intensity and publish it to the ROS network.
-	#
-	#  @param self The object pointer.
 	#  @param intensity The normalized intensity to send.
 	def send_intensity_change(self, intensity):
 		intensity_change_msg = Float32()
@@ -179,3 +177,26 @@ class SmartHomeHubNode(Node):
 		countdown_state_msg.state = state
 		self.countdown_state_pub.publish(countdown_state_msg)
 		self.get_logger().info("Set countdown state to [{0}].".format(state))
+	
+	## A helper function to package the batched wave period and publish it to the ROS network.
+	#
+	#  @param self The object pointer.
+	#  @param id_intensity_pairs A list of tuples of size 2, containing the participant IDs and their
+	#  corresponding intensities.
+	def send_wave_update(self, id_intensity_pairs):
+		wave_update_msg = WaveUpdate()
+		
+		for pair in id_intensity_pairs:
+			wave_update_msg.participant_ids.append(pair[0])
+			wave_update_msg.intensities.append(pair[1])
+		
+		self.wave_update_pub.publish(wave_update_msg)
+	
+	## A helper function to package local audio frequencies and publish it to the ROS network.
+	#
+	#  @param self The object pointer.
+	#  @param audio_frequencies A list of frequencies found in an audio packet.
+	def send_active_frequencies(self, audio_frequencies):
+		active_frequencies_msg = Float32Arr()
+		active_frequencies_msg.data = audio_frequencies
+		self.active_frequencies_pub.publish(active_frequencies_msg)

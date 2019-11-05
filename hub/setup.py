@@ -17,7 +17,8 @@ setup(
 		("lib/" + package_name, [
             "hub/GUI.py",
             "hub/SmartHomeHubController.py",
-            "hub/SmartHomeHubNode.py"
+            "hub/SmartHomeHubNode.py",
+            "hub/AudioHandler.py"
         ]),
 		("lib/" + package_name + "/resources", [
             "resource/kyoto.png"

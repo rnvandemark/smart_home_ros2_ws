@@ -1,6 +1,6 @@
+from time import sleep
 import tkinter
 from PIL import Image, ImageTk
-from time import sleep
 
 from ament_index_python.packages import get_package_prefix
 from smart_home_msgs.msg import ModeChange, CountdownState
@@ -14,12 +14,13 @@ from SmartHomeHubController import SmartHomeHubController, WAVE_PERIOD_DEFAULT_S
 LIGHT_YELLOW_COLOR = "#F0E68C"
 
 MODES_DICT = {
-	ModeChange.FULL_OFF          : ("Full Off",           "#0F2F2F"),
-	ModeChange.FULL_ON           : ("Full On",            "#3CCB2C"),
-	ModeChange.INDIVIDUAL_CONTROL: ("Individual Control", LIGHT_YELLOW_COLOR),
-	ModeChange.MORNING_COUNTDOWN : ("Morning Countdown",  LIGHT_YELLOW_COLOR),
-	ModeChange.FOLLOW_SOUND      : ("Follow Sound",       LIGHT_YELLOW_COLOR),
-	ModeChange.WAVE              : ("Wave",               LIGHT_YELLOW_COLOR)
+	ModeChange.FULL_OFF             : ("Full Off",           "#0F2F2F"),
+	ModeChange.FULL_ON              : ("Full On",            "#3CCB2C"),
+	ModeChange.INDIVIDUAL_CONTROL   : ("Individual Control", LIGHT_YELLOW_COLOR),
+	ModeChange.MORNING_COUNTDOWN    : ("Morning Countdown",  LIGHT_YELLOW_COLOR),
+	ModeChange.FOLLOW_COMPUTER_SOUND: ("Follow Hub",         LIGHT_YELLOW_COLOR),
+	ModeChange.FOLLOW_ROOM_SOUND    : ("Follow Room",        LIGHT_YELLOW_COLOR),
+	ModeChange.WAVE                 : ("Wave",               LIGHT_YELLOW_COLOR)
 }
 
 MAIN_TEXT_COLOR           = "#652828"
@@ -415,7 +416,7 @@ class GUI():
 			foreground=MAIN_TEXT_COLOR,
 			background=MAIN_COMPONENT_COLOR,
 			activeforeground=SECONDARY_TEXT_COLOR,
-			activebackground="#555555",
+			activebackground=SECONDARY_COMPONENT_COLOR,
 			command=self._handle_countdown_confirmation
 		)
 		self.confirm_countdown_btn.grid(row=9, column=3, rowspan=2, columnspan=5, sticky="nsew", padx=10, pady=30)
