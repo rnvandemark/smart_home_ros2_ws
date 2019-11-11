@@ -1,1 +1,2 @@
-test_arduino_colcon/
+uc_colcon/sketches/*/*.elf
+uc_colcon/sketches/*/*.bin

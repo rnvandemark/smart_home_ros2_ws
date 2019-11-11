@@ -1,0 +1,26 @@
+**Get arduino-cli**
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=~/usr/bin sh
+
+**Connect board to PC**
+arduino-cli core update-index
+
+**Install Due's core**
+arduino-cli core install arduino:samd
+
+**Compile the sketch**
+arduino-cli compile --fqbn arduino:sam:arduino_due_x_dbg <Sketch Parent Directory URL>
+
+**Upload the sketch**
+arduino-cli upload -p <Comm Port> --fqbn arduino:sam:arduino_due_x_dbg <Sketch Parent Directory URL>
+
+**Get Micro-XRCE-DDS Agent**
+git clone https://github.com/eProsima/Micro-XRCE-DDS-Agent.git
+cd Micro-XRCE-DDS-Agent && git checkout v1.1.0
+mkdir build && cd build
+cmake ..
+make
+sudo make install
+sudo ldconfig /usr/local/lib/
+
+**Start Micro-XRCE-DDS Agent (ROS2 Arduino Comms)**
+MicroXRCEAgent serial --dev <Comm Port> -b <Baud Rate>

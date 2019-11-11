@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format2.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="2">
+	<name>uc_colcon</name>
+	<version>0.0.1</version>
+	<description>
+		A package that contains other micro-controller code for the peripheral devices in the smart home.
+	</description>
+	
+	<maintainer email="rnvandemark@gmail.com">Nick Vandemark</maintainer>
+	<license>Do_Whatever_You_Want</license>
+	
+	<export>
+		<build_type>ament_python</build_type>
+	</export>
+</package>
