@@ -3,4 +3,4 @@
 # at index i.
 
 uint8[] participant_ids
-float32[] intensities
+Float32Arr intensities

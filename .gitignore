@@ -1,2 +1,3 @@
-uc_colcon/sketches/*/*.elf
-uc_colcon/sketches/*/*.bin
+build/
+install/
+log/

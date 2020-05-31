@@ -3,9 +3,9 @@
 
 uint8 CONFIRMATION=1
 uint8 TO_NONE=2
-uint8 TO_GREEN=3
+uint8 TO_RED=3
 uint8 TO_YELLOW=4
-uint8 TO_RED=5
+uint8 TO_GREEN=5
 uint8 TO_ALL=6
 
 uint8 state

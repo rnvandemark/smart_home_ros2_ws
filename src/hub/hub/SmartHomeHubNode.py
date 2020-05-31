@@ -2,7 +2,7 @@ from math import pi as PI
 
 from rclpy.node import Node
 
-from std_msgs.msg import Empty, UInt8, Float32
+from std_msgs.msg import Empty, Float32
 from smart_home_msgs.msg import										\
 		ModeChange, ModeChangeRequest, DeviceActivationChange,		\
 		CountdownState, WaveParticipantLocation, WaveUpdate,		\
@@ -26,7 +26,7 @@ class SmartHomeHubNode(Node):
 	#  @param traffic_light_change_handler The function callback for the GUI when a the state of the
 	#  traffic light is changed.
 	def __init__(self, mode_type_change_handler, traffic_light_change_handler):
-		super(SmartHomeHubNode, self).__init__('smart_home_hub')
+		super(SmartHomeHubNode, self).__init__("smart_home_hub")
 		
 		#
 		# Publishers
@@ -81,7 +81,7 @@ class SmartHomeHubNode(Node):
 		self.mode_change_request_sub = self.create_subscription(
 			ModeChangeRequest,
 			"/smart_home/mode_change_request_chatter",
-			self.node_change_request_callback,
+			self.mode_change_request_callback,
 			1
 		)
 		
@@ -118,7 +118,7 @@ class SmartHomeHubNode(Node):
 	#
 	#  @param self The object pointer.
 	#  @param msg The ROS message describing the node change request.
-	def node_change_request_callback(self, msg):
+	def mode_change_request_callback(self, msg):
 		self.send_mode_type(msg.mode_type, True)
 	
 	## A handler for countdown state changes. The data is sent back to the GUI to set its traffic light.
@@ -133,7 +133,8 @@ class SmartHomeHubNode(Node):
 	#  @param self The object pointer.
 	#  @param msg The ROS message describing an appliance participating in the wave along with its location.
 	def participant_location_callback(self, msg):
-		raise NotImplementedError()
+		if self.participant_locations is not None:
+			self.participant_locations.append((msg.participant_id, msg.position))
 	
 	## The routine to take the provided mode type ROS constant and send a new message.
 	#
@@ -157,6 +158,18 @@ class SmartHomeHubNode(Node):
 			self.start_wave_mode_pub.publish(Empty())
 		else:
 			self.participant_locations = None
+	
+	## A helper function to package a device (in)activation request.
+	#
+	#  @param self The object pointer.
+	#  @param device_id The coordinated ID for the device that is being requested to be activated or deactivated.
+	#  @param active Whether or not the device is to be activated or otherwise.
+	def send_device_activation_change(self, device_id, active):
+		device_activation_change_msg = DeviceActivationChange()
+		device_activation_change_msg.device_id = device_id
+		device_activation_change_msg.active = active
+		self.device_activation_change_pub.publish(device_activation_change_msg)
+		self.get_logger().info("Set device with ID [{0}] to [{1}ACTIVE].".format(device_id, "" if active else "IN"))
 	
 	## A helper function to package the batched intensity and publish it to the ROS network.
 	#
@@ -188,7 +201,7 @@ class SmartHomeHubNode(Node):
 		
 		for pair in id_intensity_pairs:
 			wave_update_msg.participant_ids.append(pair[0])
-			wave_update_msg.intensities.append(pair[1])
+			wave_update_msg.intensities.data.append(pair[1])
 		
 		self.wave_update_pub.publish(wave_update_msg)
 	
