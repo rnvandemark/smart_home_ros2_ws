@@ -1,0 +1,6 @@
+[submodule "src/hub"]
+	path = src/hub
+	url = https://github.com/rnvandemark/hub.git
+[submodule "src/smart_home_interfaces"]
+	path = src/smart_home_interfaces
+	url = https://github.com/rnvandemark/smart_home_interfaces.git
